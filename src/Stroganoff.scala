@@ -43,7 +43,7 @@ class Stroganoff(
     
     val names: Seq[String] = 0 to 9 map {"x"+_.toString}
     val data: Seq[Double] =
-      Path("1305.csv").lines().toList.map(_.split(",")(4).toDouble)
+      Path("../test/test_data.csv").lines().toList.map(_.split(",")(4).toDouble)
     
     def genExpr(depth: Int = 3): Expr = {
       def genVar() = 
