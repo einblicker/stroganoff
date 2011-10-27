@@ -1,0 +1,246 @@
+package stroganoff
+
+import scalax.file.Path
+import org.apache.commons.math.linear.Array2DRowRealMatrix
+
+object Random extends java.util.Random
+
+class Stroganoff(
+  popSize: Int,
+  crossProb: Double,
+  mutProb: Double,
+  weight: Double = 1.0
+) {
+
+  val path = """C:\sbt\stroganoff\src\main\scala\sample.csv"""
+
+  type Factors = (Double, Double, Double, Double, Double, Double)
+
+  sealed trait Expr
+  case class Var(name: String) extends Expr
+  case class Node(
+    var factors: Factors,
+    var fn: Option[Seq[Double] => Double],
+    lhs: Expr,
+    rhs: Expr
+  ) extends Expr
+  
+  val names: Seq[String] = (0 to 9).map("x" + _.toString)
+  val data: Seq[Double] =
+    Path(path).lines().toSeq.map(_.split(",")(4).toDouble).drop(100).take(100)
+  
+  def genExpr(depth: Int = 3): Expr = {
+    def genVar() = 
+      Var(names(Random.nextInt(names.length)))
+    def genNode() = {
+      val expr = Node((0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+		      None,
+		      genExpr(depth - 1),
+		      genExpr(depth - 1))
+      setFactorAndFn(expr)
+      expr
+    }
+    Random.nextDouble() match {
+      case x if x < 0.5 || depth <= 0 =>
+	genVar()
+      case _ =>
+	genNode()
+    }
+  }
+  
+  def mutation(expr: Expr): Expr = 
+    if (Random.nextDouble() < 0.5)
+      genExpr()
+    else
+      expr match {
+	case expr@Var(_) =>
+      expr
+	case Node(factors, fn, lhs, rhs) =>
+	  Node(factors,
+	       fn,
+	       mutation(lhs),
+	       mutation(rhs))
+      }
+  
+  def crossover(
+    expr1: Expr,
+    expr2: Expr
+  ): (Expr, Expr) = {
+    import Susp._
+    
+    var haltFn = () => Random.nextDouble() < 0.5
+    def suspendableIter(expr: Expr): Susp[Expr] =
+      expr match {
+	case _ if haltFn() => for {
+	  newExpr <- suspend(expr)
+	 } yield newExpr
+	case Var(_) =>
+	  Result(expr)
+	case Node(factors, fn, lhs, rhs) => for {
+	  lhs <- suspendableIter(lhs)
+	  rhs <- suspendableIter(rhs)
+	 } yield Node(factors, fn, lhs, rhs)
+      }
+  
+    def recur(susp1: Susp[Expr], susp2: Susp[Expr]): (Expr, Expr) =
+      (susp1, susp2) match {
+	case (Cont(sub1, cont1), Cont(sub2, cont2)) =>
+          recur(cont1(sub2), cont2(sub1))
+        case (Cont(sub1, cont1), expr@Result(_)) =>
+	  recur(cont1(sub1), expr)
+        case (expr@Result(_), Cont(sub2, cont2)) =>
+	  recur(expr, cont2(sub2))
+        case (Result(expr1), Result(expr2)) =>
+	  (expr1, expr2)
+      }
+    
+    val susp1 = suspendableIter(expr1)
+    val susp2 = suspendableIter(expr2)
+    haltFn = () => false
+    val (newExpr1, newExpr2) = recur(susp1, susp2)
+    setFactorAndFn(newExpr1)
+    setFactorAndFn(newExpr2)
+    (newExpr1, newExpr2)
+  }
+
+  def setFactorAndFn(expr: Expr): Unit = {
+    def calc(z1: Seq[Double], z2: Seq[Double], y: Seq[Double]) = {
+      val X = new Array2DRowRealMatrix(
+	(z1 zip z2).map{
+          case (a, b) =>
+	    Array(1.0, a, b, a*b, a*a, b*b)
+	}.toArray)
+      val Xt = X.transpose
+      val XtX = Xt.multiply(X)
+      if (XtX.isSingular) Array(Array(0.0, 0.0, 0.0, 0.0, 0.0, 0.0))
+      else XtX.inverse.multiply(Xt).
+      multiply(new Array2DRowRealMatrix(y.toArray.drop(names.length - 1))).
+      transpose.getData()
+    }
+
+    def recur(expr: Expr): Seq[Double] => Double =
+      expr match {
+	case Var(name) =>
+          val index = name.last.toInt - '0'.toInt
+	  vars => vars(index)
+	case expr@Node(_, _, lhs, rhs) =>
+	  val lhsFn = recur(lhs)
+	  val rhsFn = recur(rhs)
+	  val z1 = data.sliding(names.length).map(lhsFn).toSeq
+          val z2 = data.sliding(names.length).map(rhsFn).toSeq
+          val Array(Array(a0, a1, a2, a3, a4, a5)) = calc(z1, z2, data)
+          expr.factors = (a0, a1, a2, a3, a4, a5)
+	  val fn: Seq[Double] => Double = vars => {
+	    val x1 = lhsFn(vars)
+	    val x2 = rhsFn(vars)
+	    a0 + a1*x1 + a2*x2 + a3*x1*x2 + a4*x1*x1 + a5*x2*x2
+          }
+          expr.fn = Some(fn)
+          fn
+      }
+    
+    recur(expr)
+    ()
+  }
+
+  def countParam(expr: Expr): Int =
+    expr match {
+      case Var(_) => 0
+      case Node(_, _, lhs, rhs) =>
+	6 + countParam(lhs) + countParam(rhs)
+    }
+  
+  def fitness(expr: Expr): Double = {
+    import math._
+    
+    def compile(expr: Expr): Seq[Double] => Double =
+      expr match {
+	case Var(name) =>
+          val index = name.last.toInt - '0'.toInt
+	  (vars => vars(index))
+        case Node((a0, a1, a2, a3, a4, a5), Some(fn), lhs, rhs) =>
+	  fn
+        case Node((a0, a1, a2, a3, a4, a5), None, lhs, rhs) =>
+	  val lhsFn = compile(lhs)
+          val rhsFn = compile(rhs)
+          vars => {
+	    val x1 = lhsFn(vars)
+	    val x2 = rhsFn(vars)
+	    a0 + a1*x1 + a2*x2 + a3*x1*x2 + a4*x1*x1 + a5*x2*x2
+	  }
+     }
+
+    def countParam(expr: Expr): Int =
+      expr match {
+	case Var(_) => 0
+	case Node(_, _, lhs, rhs) =>
+	  6 + countParam(lhs) + countParam(rhs)
+      }
+    
+    val x1 = data.sliding(names.length).map(compile(expr)).toSeq
+    val x2 = data.dropRight(names.length - 1).drop(60)
+    val N = x2.length.toDouble
+    val S = ((x1 zip x2).map{case (x, y) => pow(x - y, 2.0)}.sum + 1) / N
+    val R = countParam(expr).toDouble
+    0.5*N*log(S + 1) + weight*0.5*R*log(N + 1)
+  }
+
+  def evolve(): Expr = {
+    var pool: Seq[Expr] = (1 to popSize).map(_ => genExpr())
+    for(_ <- 1 to 100) {
+      val poolWithFitness = pool.map(expr => (1.0/fitness(expr), expr)).sortBy(- _._1)
+      val totalFitness = poolWithFitness.map(_._1).sum
+      val accumFitness = poolWithFitness.scanLeft(0.0, Var(names.head):Expr){
+	case ((acc, _), (fitness, expr)) =>
+          (acc + fitness, expr)
+      }.tail
+	
+      def randomPick(): Expr = {
+	val pivVal = Random.nextDouble * totalFitness
+	val Some((_, expr)) = accumFitness.find(_._1 >= pivVal)
+	expr
+      }
+
+      import collection.mutable.MutableList
+      val nextGeneration = new MutableList[Expr]()
+      nextGeneration ++= poolWithFitness.take((popSize * 5.0 / 100.0).toInt).map(_._2)
+      while (nextGeneration.length < popSize) {
+	def probApp[T](prob: Double, arg: T)(fn: T => T) =
+          if (Random.nextDouble() < prob) fn(arg) else arg
+	val expr1 = probApp(mutProb, randomPick())(mutation)
+	val expr2 = probApp(mutProb, randomPick())(mutation)
+	val (newExpr1, newExpr2) =
+          probApp(crossProb, (expr1, expr2)){case (a, b) => crossover(a, b)}
+	nextGeneration += newExpr1
+	nextGeneration += newExpr2
+      }
+      pool = nextGeneration.toSeq
+      println("average of reciprocal of fitness:" + totalFitness/popSize)
+    }
+    /*
+    println(pool sortBy(-fitness(_)) head)
+    println("worst case:" + fitness(pool sortBy(-fitness(_)) head))
+
+    println(pool sortBy(fitness) head)
+    println("best case:" + fitness(pool sortBy(fitness) head))
+*/
+    pool.sortBy(fitness).head
+  }
+}
+
+object Stroganoff {
+  def main(args: Array[String]): Unit = {
+    /*
+    var weight = 0.0
+    while (weight < 1.0) {
+	val sg = new Stroganoff(500, 0.6, 0.6, weight)
+	val expr = sg.evolve()
+	println("weight["+weight+"]:count[" + sg.countParam(expr)+"]:fitness["+sg.fitness(expr)+"]")
+	weight += 0.1
+    }*/
+    val sg = new Stroganoff(1000, 0.6, 0.6, 0.0)
+    val expr = sg.evolve()
+    println(sg.fitness(expr))
+    println(expr)
+  }
+}
