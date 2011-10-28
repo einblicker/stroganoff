@@ -12,7 +12,7 @@ class Stroganoff(
   weight: Double = 1.0
 ) {
 
-  val path = """C:\sbt\stroganoff\src\main\scala\sample.csv"""
+  val path = """sample.csv"""
 
   type Factors = (Double, Double, Double, Double, Double, Double)
 
@@ -217,27 +217,12 @@ class Stroganoff(
       pool = nextGeneration.toSeq
       println("average of reciprocal of fitness:" + totalFitness/popSize)
     }
-    /*
-    println(pool sortBy(-fitness(_)) head)
-    println("worst case:" + fitness(pool sortBy(-fitness(_)) head))
-
-    println(pool sortBy(fitness) head)
-    println("best case:" + fitness(pool sortBy(fitness) head))
-*/
     pool.sortBy(fitness).head
   }
 }
 
 object Stroganoff {
   def main(args: Array[String]): Unit = {
-    /*
-    var weight = 0.0
-    while (weight < 1.0) {
-	val sg = new Stroganoff(500, 0.6, 0.6, weight)
-	val expr = sg.evolve()
-	println("weight["+weight+"]:count[" + sg.countParam(expr)+"]:fitness["+sg.fitness(expr)+"]")
-	weight += 0.1
-    }*/
     val sg = new Stroganoff(1000, 0.6, 0.6, 0.0)
     val expr = sg.evolve()
     println(sg.fitness(expr))
