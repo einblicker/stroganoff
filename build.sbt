@@ -1,7 +1,5 @@
 scalaVersion := "2.9.1"
 
-//scalaOptions += "-P:continuations:enable"
-
 scalacOptions ++= Seq("-deprecation")
 
 autoCompilerPlugins := true

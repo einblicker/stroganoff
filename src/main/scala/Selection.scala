@@ -7,7 +7,7 @@ trait Selection { self: Stroganoff =>
 }
 
 trait Roulette extends Selection { self: Stroganoff =>
-  def selection(pool: Seq[self.Expr]): (Double, Seq[self.Expr]) = {
+  def selection(pool: Seq[Expr]): (Double, Seq[Expr]) = {
     val poolWithFitness = pool.par.map(expr => (1.0/fitness(expr), expr)).toList.sortBy(- _._1)
     val totalFitness = poolWithFitness.map(_._1).sum
     val accumFitness = poolWithFitness.scanLeft(0.0, Var(names.head):Expr){
@@ -15,7 +15,7 @@ trait Roulette extends Selection { self: Stroganoff =>
 	(acc + fitness, expr)
     }.tail
 	
-    def randomPick(): self.Expr = {
+    def randomPick(): Expr = {
       val pivVal = Random.nextDouble * totalFitness
       val Some((_, expr)) = accumFitness.find(_._1 >= pivVal)
       expr

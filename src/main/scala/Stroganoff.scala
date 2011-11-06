@@ -31,16 +31,19 @@ abstract class Stroganoff(
   val validationData: Seq[Double] =
     Path(path).lines().toSeq.map(_.split(",")(4).toDouble).drop(500).take(500)
 
-  val seek = 30
+  val period = 30
   
   def genExpr(depth: Int = 3): Expr = {
     def genVar() = 
       Var(names(Random.nextInt(names.length)))
     def genNode() = {
-      val expr = Node((0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
-		      None,
-		      genExpr(depth - 1),
-		      genExpr(depth - 1))
+      val expr =
+	Node(
+          (0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+          None,
+          genExpr(depth - 1),
+          genExpr(depth - 1)
+        )
       setFactorAndFn(expr)
       expr
     }
@@ -58,12 +61,14 @@ abstract class Stroganoff(
     else
       expr match {
 	case expr@Var(_) =>
-      expr
+          expr
 	case Node(factors, fn, lhs, rhs) =>
-	  Node(factors,
-	       fn,
-	       mutation(lhs),
-	       mutation(rhs))
+	  Node(
+            factors,
+	    fn,
+            mutation(lhs),
+            mutation(rhs)
+          )
       }
   
   def crossover(
@@ -146,13 +151,6 @@ abstract class Stroganoff(
     recur(expr)
     ()
   }
-
-  def countParam(expr: Expr): Int =
-    expr match {
-      case Var(_) => 0
-      case Node(_, _, lhs, rhs) =>
-	6 + countParam(lhs) + countParam(rhs)
-    }
   
   def fitness(expr: Expr): Double = {
     import math._
@@ -182,7 +180,7 @@ abstract class Stroganoff(
       }
     
     val x1 = data.sliding(names.length).map(compile(expr)).toSeq
-    val x2 = data.dropRight(names.length - 1).drop(seek)
+    val x2 = data.dropRight(names.length - 1).drop(period)
     val N = x2.length.toDouble
     val S = ((x1 zip x2).map{case (x, y) => pow(x - y, 2.0)}.sum + 1) / N
     val R = countParam(expr).toDouble
@@ -209,7 +207,7 @@ object Stroganoff {
     val expr = sg.evolve()
     println(expr)
     val Node(_, Some(fn), _, _) = expr
-    val z1 = validationData.dropRight(names.length - 1).drop(seek).toSeq
+    val z1 = validationData.dropRight(names.length - 1).drop(period).toSeq
     val z2 = validationData.sliding(names.length).map(fn).toSeq
     (z1 zip z2).foreach{case (a, b) => println(""+a+","+b)}
   }
