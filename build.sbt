@@ -1,6 +1,14 @@
 scalaVersion := "2.9.1"
 
+//scalaOptions += "-P:continuations:enable"
+
 scalacOptions ++= Seq("-deprecation")
+
+autoCompilerPlugins := true
+
+addCompilerPlugin("org.scala-lang.plugins" % "continuations" % "2.9.1")
+
+scalacOptions += "-P:continuations:enable"
 
 libraryDependencies ++= Seq(
   "org.scalaz" %% "scalaz-core" % "6.0.3",

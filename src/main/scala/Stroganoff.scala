@@ -5,11 +5,11 @@ import org.apache.commons.math.linear.Array2DRowRealMatrix
 
 object Random extends java.util.Random
 
-class Stroganoff(
-  popSize: Int,
-  crossProb: Double,
-  mutProb: Double,
-  weight: Double = 1.0
+abstract class Stroganoff(
+  val popSize: Int,
+  val crossProb: Double,
+  val mutProb: Double,
+  val weight: Double = 1.0
 ) {
 
   val path = """sample.csv"""
@@ -27,7 +27,11 @@ class Stroganoff(
   
   val names: Seq[String] = (0 to 9).map("x" + _.toString)
   val data: Seq[Double] =
-    Path(path).lines().toSeq.map(_.split(",")(4).toDouble).drop(100).take(100)
+    Path(path).lines().toSeq.map(_.split(",")(4).toDouble).take(500)
+  val validationData: Seq[Double] =
+    Path(path).lines().toSeq.map(_.split(",")(4).toDouble).drop(500).take(500)
+
+  val seek = 30
   
   def genExpr(depth: Int = 3): Expr = {
     def genVar() = 
@@ -178,43 +182,20 @@ class Stroganoff(
       }
     
     val x1 = data.sliding(names.length).map(compile(expr)).toSeq
-    val x2 = data.dropRight(names.length - 1).drop(60)
+    val x2 = data.dropRight(names.length - 1).drop(seek)
     val N = x2.length.toDouble
     val S = ((x1 zip x2).map{case (x, y) => pow(x - y, 2.0)}.sum + 1) / N
     val R = countParam(expr).toDouble
     0.5*N*log(S + 1) + weight*0.5*R*log(N + 1)
   }
 
+  def selection(pool: Seq[Expr]): (Double, Seq[Expr])
+
   def evolve(): Expr = {
     var pool: Seq[Expr] = (1 to popSize).map(_ => genExpr())
-    for(_ <- 1 to 100) {
-      val poolWithFitness = pool.map(expr => (1.0/fitness(expr), expr)).sortBy(- _._1)
-      val totalFitness = poolWithFitness.map(_._1).sum
-      val accumFitness = poolWithFitness.scanLeft(0.0, Var(names.head):Expr){
-	case ((acc, _), (fitness, expr)) =>
-          (acc + fitness, expr)
-      }.tail
-	
-      def randomPick(): Expr = {
-	val pivVal = Random.nextDouble * totalFitness
-	val Some((_, expr)) = accumFitness.find(_._1 >= pivVal)
-	expr
-      }
-
-      import collection.mutable.MutableList
-      val nextGeneration = new MutableList[Expr]()
-      nextGeneration ++= poolWithFitness.take((popSize * 5.0 / 100.0).toInt).map(_._2)
-      while (nextGeneration.length < popSize) {
-	def probApp[T](prob: Double, arg: T)(fn: T => T) =
-          if (Random.nextDouble() < prob) fn(arg) else arg
-	val expr1 = probApp(mutProb, randomPick())(mutation)
-	val expr2 = probApp(mutProb, randomPick())(mutation)
-	val (newExpr1, newExpr2) =
-          probApp(crossProb, (expr1, expr2)){case (a, b) => crossover(a, b)}
-	nextGeneration += newExpr1
-	nextGeneration += newExpr2
-      }
-      pool = nextGeneration.toSeq
+    for(_ <- 1 to 20) {
+      val (totalFitness, nextGeneration) = selection(pool)
+      pool = nextGeneration
       println("average of reciprocal of fitness:" + totalFitness/popSize)
     }
     pool.sortBy(fitness).head
@@ -223,9 +204,13 @@ class Stroganoff(
 
 object Stroganoff {
   def main(args: Array[String]): Unit = {
-    val sg = new Stroganoff(1000, 0.6, 0.6, 0.0)
+    val sg = new Stroganoff(1000, 0.6, 0.6, 0.001) with Roulette
+    import sg._
     val expr = sg.evolve()
-    println(sg.fitness(expr))
     println(expr)
+    val Node(_, Some(fn), _, _) = expr
+    val z1 = validationData.dropRight(names.length - 1).drop(seek).toSeq
+    val z2 = validationData.sliding(names.length).map(fn).toSeq
+    (z1 zip z2).foreach{case (a, b) => println(""+a+","+b)}
   }
 }
